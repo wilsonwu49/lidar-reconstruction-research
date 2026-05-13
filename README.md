@@ -3,7 +3,7 @@
 Undergraduate research project benchmarking interpolation methods for LiDAR view synthesis using an Ouster OS2-128 sensor. Research conducted at ASAR Lab, Tufts University, under Professor Jason Rife (2025–2026).
 
 ## Poster
-![LiDAR View Synthesis Poster](docs/LiDAR View Synthesis Poster - Rife 2026-1.png)
+![LiDAR View Synthesis Poster](docs/poster.png)
 
 ## Overview
 
