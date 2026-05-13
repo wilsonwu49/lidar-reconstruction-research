@@ -1,4 +1,5 @@
- cd 'C:\Users\wilso\RifeResearch'
+% Path to raw LiDAR data
+cd 'C:\Users\wilso\RifeResearch'
 
 clear ousterReader;
 ousterReader = ousterFileReader(pcapFile, jsonFile);
@@ -9,7 +10,7 @@ ousterReader.CurrentTime = shiftStartTime;
 userSelectData = 1;   % Default is 1; change to 2 for dual-return data
 flagPlayMovie = false;
 flagWriteClip = true;
-writeClipNumber = 11; % If flagWriteClip is true, which clip to write?
+writeClipNumber = 11; % If flagWriteClip is true, which clip to write to?
 
 % Read Data
 shiftStartFrame = 1;  
@@ -21,8 +22,8 @@ switch userSelectData
         jsonFile = "OS-2-128_v2.5.3_2048x10_20250318_105927.json";
         if flagWriteClip
             clipLen = 60;
-            stationaryFrames = [10 1100 1850 8900 11350]; %Times when lidar stationary 
-            motionFrames = [1500 2200 3500 5000 5700 6500 7500 8500 10500] ;
+            stationaryFrames = [10 1100 1850 8900 11350]; % Times when stationary 
+            motionFrames = [1500 2200 3500 5000 5700 6500 7500 8500 10500] ; % Times when car in motion
             listStartFrames = [stationaryFrames motionFrames];
             shiftStartFrame = listStartFrames(writeClipNumber);  
         end

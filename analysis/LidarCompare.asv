@@ -339,7 +339,7 @@ function prm = generateMask(prm)
 end
 
 
-%% INTERPOLATION METHODS
+% INTERPOLATION METHODS
 function interpAER = vec_aerInterpMeth(listAER,prm)
     switch prm.interpMethod
         case 0
@@ -355,10 +355,8 @@ function interpAER = vec_aerInterpMeth(listAER,prm)
     end
 end
 
-% Splats points onto oversampled grid with Gaussian kernel, fills holes spectrally, downsamples
-% In: listAER [3xN], prm (key params: upsample, kernelW, sigma_splat)
-% Out: newAERinterp [3 x nEl*nAz]
-function newAERinterp = AERnurecon(listAER, prm)    
+function newAERinterp = AERnurecon(listAER, prm)
+            
     upsample  = 4;
     kernelW   = 2;      % half-width in oversampled grid cells — increase to reduce holes
     sigma_splat = 2;  % Gaussian splat width in grid cells
@@ -533,7 +531,7 @@ function listAER = vec_aerInterp(listAER,prm)
     [Anew,Enew]=meshgrid(azTicks,elTicks);
     nCols = prm.nAz*prm.nEl;
     listAER = [reshape(Anew,1,nCols); reshape(Enew,1,nCols); reshape(Rinterp,1,nCols);];
-end 
+end %
 
 function listAER = vec_aerInterpZeroPad(listAER,prm)
     % Initialize range map (finer)
@@ -764,7 +762,7 @@ function inMask=inTriangle(vx,vy,xGrid,yGrid)
 end
 
 %% VIZUALIZATION
-% % Displays range image as grayscale where intensity is inversely scaled
+% % Displays range image as grayscale where intensity = 3/R * 255 * 2 (closer = brighter)
 function vizAzEl(imAER,prm)
     [Amat,Emat,Rmat] = vec2mataer(imAER,[prm.nEl size(imAER,2)/prm.nEl]); 
     image(3./Rmat*255*2);

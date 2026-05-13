@@ -1,11 +1,9 @@
-%% benchmark_local_methods.m
-%% Computes RMSE for all local methods, stores in benchmark_results.mat
-%% Matches Document 10 calculation: poseDistance includes rotation term
+% local_rmse.m
+% Computes RMSE for local methods (Splat, NN, Linear, BilinearSplat) across frames
+% No ego mask applied; results saved to benchmark_results1.mat
 clear; clc;
 
-%% =========================================================
-%% DATASET CONFIGURATION
-%% =========================================================
+% Dataset config
 cfg.fileName    = 'C:\Users\wilso\RifeResearch\VolpeOuster_0318_1059_2200.mat';
 cfg.refFrameNum = 30;
 cfg.frameNums   = 1:60;
@@ -13,24 +11,20 @@ cfg.datasetTag  = 'Volpe_2200_ref30_v2';
 
 resultsFile = 'C:\Users\wilso\RifeResearch\benchmark_results1.mat';
 
-%% =========================================================
-%% SENSOR PARAMETERS
-%% =========================================================
+% Sensor parameters
 prm.azStart      = 2*pi;
 prm.azDir        = -1;
 prm.minEl        = -11.27*pi/180;
 prm.maxEl        =  10.63*pi/180;
 prm.interpMethod = 1;
 
-%% =========================================================
-%% LOAD REFERENCE
-%% =========================================================
+% Load reference
 fprintf('Loading %s, reference frame %d\n', cfg.fileName, cfg.refFrameNum);
 load(cfg.fileName);
 
 refPC   = pc{cfg.refFrameNum};
-prm.nEl = size(refPC,1);
-prm.nAz = size(refPC,2);
+prm.nEl = size(refPC, 1);
+prm.nAz = size(refPC, 2);
 prm     = generateMask(prm);
 
 refXYZ = pc2xyz(refPC);
@@ -42,15 +36,11 @@ az = linspace(prm.azStart, prm.azStart + prm.azDir*2*pi, prm.nAz);
 el = linspace(prm.maxEl, prm.minEl, prm.nEl);
 [AzGrid, ElGrid] = meshgrid(az, el);
 
-%% =========================================================
-%% METHOD NAMES
-%% =========================================================
+% Methods
 methods = {'Splat','NN','Linear','BilinearSplat'};
 nMeth   = numel(methods);
 
-%% =========================================================
-%% PREALLOCATE
-%% =========================================================
+% Preallocate
 nFrames      = numel(cfg.frameNums);
 poseDistance = zeros(1, nFrames);
 distance     = zeros(1, nFrames);
@@ -61,9 +51,7 @@ median_all   = nan(nMeth, nFrames);
 pct95_all    = nan(nMeth, nFrames);
 coverage_all = nan(nMeth, nFrames);
 
-%% =========================================================
-%% MAIN LOOP
-%% =========================================================
+% Main loop
 for fi = 1:nFrames
     fNum = cfg.frameNums(fi);
     fprintf('\nFrame %d / %d (frame num %d) ...\n', fi, nFrames, fNum);
@@ -71,7 +59,7 @@ for fi = 1:nFrames
     newPC  = pc{fNum};
     newXYZ = pc2xyz(newPC);
 
-    %% ICP
+    % ICP registration
     pcNew     = pointCloud(newXYZ');
     pcRef     = pointCloud(refXYZ');
     tform     = pcregistericp(pcNew, pcRef, Metric="planeToPlane");
@@ -81,46 +69,40 @@ for fi = 1:nFrames
     frameOffset      = fNum - cfg.refFrameNum;
     distance(fi)     = sign(frameOffset) * norm(prm.delta);
     rotation(fi)     = acos(min(1, max(-1, (trace(prm.R)-1)/2)));
-    poseDistance(fi) = distance(fi);   % matches Document 10
+    poseDistance(fi) = distance(fi);
 
-    %% transform into reference frame — NO ego mask applied here (matches Doc 10)
+    % Transform into reference coordinates (no ego mask)
     newXYZref = prm.R * double(newXYZ) + prm.delta;
     newAERref = vec_xyz2aer(newXYZref, prm);
 
-    %% scattered interpolant inputs
     azNew = newAERref(1,:)';
     elNew = newAERref(2,:)';
     rNew  = newAERref(3,:)';
     valid = isfinite(rNew) & rNew > 0 & rNew < 200;
 
-    %% run all methods
+    % Run methods
     rangeResults = cell(nMeth, 1);
 
-    % 1. Splat
     R_splat = AERnurecon(newAERref, prm);
     R_splat = reshape(R_splat(3,:), prm.nEl, prm.nAz);
     R_splat(~isfinite(R_splat) | R_splat <= 0 | R_splat > 200) = NaN;
     rangeResults{1} = R_splat;
 
-    % 2. NN
     F_nn  = scatteredInterpolant(azNew(valid), elNew(valid), rNew(valid), 'nearest', 'none');
     R_nn  = F_nn(AzGrid, ElGrid);
     R_nn(~isfinite(R_nn) | R_nn <= 0 | R_nn > 200) = NaN;
     rangeResults{2} = R_nn;
 
-    % 3. Linear
     F_lin = scatteredInterpolant(azNew(valid), elNew(valid), rNew(valid), 'linear', 'none');
     R_lin = F_lin(AzGrid, ElGrid);
     R_lin(~isfinite(R_lin) | R_lin <= 0 | R_lin > 200) = NaN;
     rangeResults{3} = R_lin;
 
-
-    % 6. Bilinear Splat (no hole filling)
     R_raw = rawSplat(newAERref, prm);
     R_raw(~isfinite(R_raw) | R_raw <= 0 | R_raw > 200) = NaN;
     rangeResults{4} = R_raw;
 
-    %% compute metrics
+    % Compute metrics
     refValid   = isfinite(refR);
     totalValid = sum(refValid(:));
 
@@ -129,7 +111,6 @@ for fi = 1:nFrames
         vmask = refValid & isfinite(R_m);
         nv    = sum(vmask(:));
         coverage_all(m, fi) = nv / totalValid * 100;
-
         if nv > 0
             err_abs = abs(R_m(vmask) - refR(vmask));
             rmse_all(m,   fi) = sqrt(mean(err_abs.^2));
@@ -141,14 +122,11 @@ for fi = 1:nFrames
     fprintf('  %-15s %8s %8s %8s %6s\n', 'Method','RMSE','Median','95pct','Cov%');
     for m = 1:nMeth
         fprintf('  %-15s %8.2f %8.2f %8.2f %5.1f%%\n', ...
-            methods{m}, rmse_all(m,fi), median_all(m,fi), ...
-            pct95_all(m,fi), coverage_all(m,fi));
+            methods{m}, rmse_all(m,fi), median_all(m,fi), pct95_all(m,fi), coverage_all(m,fi));
     end
 end
 
-%% =========================================================
-%% SAVE
-%% =========================================================
+% Save
 newEntry.tag          = cfg.datasetTag;
 newEntry.fileName     = cfg.fileName;
 newEntry.refFrameNum  = cfg.refFrameNum;
@@ -184,18 +162,15 @@ end
 save(resultsFile, 'allResults');
 fprintf('Saved to %s  (%d total datasets)\n', resultsFile, numel(allResults));
 
+% Plot
 colors = lines(nMeth);
 figure(1); clf; hold on;
-
 for m = 1:nMeth
     valid = isfinite(rmse_all(m,:)) & abs(poseDistance) > 0.1;
     [sd, si] = sort(poseDistance(valid));
     sr = rmse_all(m, valid);
-    sr = sr(si);
-    plot(sd, sr, 'Color', colors(m,:), 'LineWidth', 1.5, ...
-         'DisplayName', methods{m});
+    plot(sd, sr(si), 'Color', colors(m,:), 'LineWidth', 1.5, 'DisplayName', methods{m});
 end
-
 xline(0, '--k', 'HandleVisibility', 'off');
 xlabel('Pose Distance (m)', 'FontSize', 12);
 ylabel('RMSE (m)', 'FontSize', 12);
@@ -204,10 +179,11 @@ legend('Location', 'best', 'FontSize', 9);
 grid on;
 set(gcf, 'Position', [100 100 900 500]);
 
-%% =========================================================
-%% FUNCTIONS
-%% =========================================================
 
+%% Functions
+
+% Splats points onto oversampled grid with bilinear weights, fills holes via Gaussian spectral smoothing
+% In: listAER [3xN], prm  Out: newAERinterp [3 x nEl*nAz]
 function newAERinterp = AERnurecon(listAER, prm)
     upsample = 2;
     nElDec = prm.nEl * upsample;
@@ -219,8 +195,8 @@ function newAERinterp = AERnurecon(listAER, prm)
     az    = listAER(1,valid);
     el    = listAER(2,valid);
     curR  = curR(valid);
-    aPos = (az-azTicks(1))/(azTicks(2)-azTicks(1))+1;
-    ePos = (el-elTicks(1))/(elTicks(2)-elTicks(1))+1;
+    aPos=(az-azTicks(1))/(azTicks(2)-azTicks(1))+1;
+    ePos=(el-elTicks(1))/(elTicks(2)-elTicks(1))+1;
     a0=floor(aPos); a1=a0+1; e0=floor(ePos); e1=e0+1;
     wa1=aPos-a0; wa0=1-wa1; we1=ePos-e0; we0=1-we1;
     a0=max(min(a0,nAzDec),1); a1=max(min(a1,nAzDec),1);
@@ -253,6 +229,8 @@ function newAERinterp = AERnurecon(listAER, prm)
     newAERinterp=[reshape(AzGrid,1,nCols);reshape(ElGrid,1,nCols);reshape(Rout,1,nCols)];
 end
 
+% Bilinear splat only, no hole filling
+% In: listAER [3xN], prm  Out: Rout [nEl x nAz]
 function Rout = rawSplat(listAER, prm)
     upsample=2; nElDec=prm.nEl*upsample; nAzDec=prm.nAz*upsample;
     elTicks=linspace(prm.maxEl,prm.minEl,nElDec);
@@ -280,40 +258,8 @@ function Rout = rawSplat(listAER, prm)
     Rout(Rout<=0|Rout>200)=Inf;
 end
 
-function listAER = vec_aerInterp(listAER, prm)
-    [Amat,Emat,Rmat]=vec2mataer(listAER,[prm.nEl prm.nAz]);
-    elTicks=linspace(prm.maxEl,prm.minEl,prm.nEl);
-    azTicks=prm.azStart+prm.azDir*(0:prm.nAz-1)/prm.nAz*2*pi;
-    Rinterp=Inf(prm.nEl,prm.nAz);
-    [isConsistSE,isConsistNW]=boxConsist(Amat,Emat);
-    [rowSE,colSE]=find(isConsistSE); [rowNW,colNW]=find(isConsistNW);
-    for n=1:length(rowSE)
-        rn=rowSE(n); cn=colSE(n);
-        aList=[Amat(rn+1,cn+1) Amat(rn+1,cn) Amat(rn,cn+1)];
-        eList=[Emat(rn+1,cn+1) Emat(rn+1,cn) Emat(rn,cn+1)];
-        rList=[Rmat(rn+1,cn+1) Rmat(rn+1,cn) Rmat(rn,cn+1)];
-        Rinterp=viewSynthesisNN(aList,eList,rList,azTicks,elTicks,Rinterp);
-    end
-    for n=1:length(rowNW)
-        rn=rowNW(n); cn=colNW(n);
-        aList=[Amat(rn,cn) Amat(rn+1,cn) Amat(rn,cn+1)];
-        eList=[Emat(rn,cn) Emat(rn+1,cn) Emat(rn,cn+1)];
-        rList=[Rmat(rn,cn) Rmat(rn+1,cn) Rmat(rn,cn+1)];
-        Rinterp=viewSynthesisNN(aList,eList,rList,azTicks,elTicks,Rinterp);
-    end
-    delAz=azTicks(1)-azTicks(2); delEl=elTicks(1)-elTicks(2);
-    AzVecRnd=round((azTicks(1)-listAER(1,:))/delAz+1);
-    ElVecRnd=round((elTicks(1)-listAER(2,:)+1e-7)/delEl+1);
-    rVec=listAER(3,:);
-    inRange=find(AzVecRnd>0&AzVecRnd<=prm.nAz&ElVecRnd>0&ElVecRnd<=prm.nEl&rVec>0&rVec<200);
-    indxRnd=sub2ind([prm.nEl prm.nAz],ElVecRnd(inRange),AzVecRnd(inRange));
-    replaceFlag=Rinterp(indxRnd)>rVec(inRange);
-    Rinterp(indxRnd(replaceFlag))=rVec(inRange(replaceFlag));
-    [Anew,Enew]=meshgrid(azTicks,elTicks);
-    nCols=prm.nAz*prm.nEl;
-    listAER=[reshape(Anew,1,nCols);reshape(Enew,1,nCols);reshape(Rinterp,1,nCols)];
-end
-
+% Converts [3xN] XYZ to [3xN] AER with azimuth unwrapping
+% In: listXYZ [3xN], prm  Out: listAER [3xN]
 function listAER = vec_xyz2aer(listXYZ, prm)
     AzRaw=atan2(listXYZ(2,:),listXYZ(1,:));
     Az=azUnwrap(AzRaw,prm);
@@ -323,13 +269,10 @@ function listAER = vec_xyz2aer(listXYZ, prm)
     listAER=[Az;El;range];
 end
 
-function [matA,matE,matR]=vec2mataer(vecAER,imSize)
-    matA=reshape(vecAER(1,:),imSize(1:2));
-    matE=reshape(vecAER(2,:),imSize(1:2));
-    matR=reshape(vecAER(3,:),imSize(1:2));
-end
-
-function correctedAz=azUnwrap(Az,prm)
+% Corrects azimuth wrap-around errors relative to nominal scan direction
+% In: Az [nEl x nAz], prm  Out: correctedAz [nEl x nAz]
+% Note: only corrects +-2pi slips
+function correctedAz = azUnwrap(Az, prm)
     correctedAz=Az;
     numCols=size(Az,2);
     nomAngle=linspace(prm.azStart,prm.azStart+prm.azDir*2*pi,numCols+1);
@@ -340,7 +283,10 @@ function correctedAz=azUnwrap(Az,prm)
     correctedAz(angleDiff<-pi/2)=correctedAz(angleDiff<-pi/2)+2*pi;
 end
 
-function prm=generateMask(prm)
+% Builds ego-vehicle pixel mask, stores linear indices in prm.domainMaskColIndxAER
+% In/Out: prm
+% Note: mask coordinates determined manually for this vehicle and mount
+function prm = generateMask(prm)
     maskRangeIm=false(prm.nEl,prm.nAz);
     maskRangeIm(127:128,:)=true;
     maskRangeIm(118:128,178:207)=true;
@@ -353,50 +299,11 @@ function prm=generateMask(prm)
     prm.domainMaskColIndxAER=find(domainMask1D);
 end
 
-function vecXYZ=pc2xyz(pc)
+% Converts point cloud struct (nEl x nAz x 3) to [3xN] XYZ array
+% In: pc  Out: vecXYZ [3xN]
+function vecXYZ = pc2xyz(pc)
     totPix=size(pc,1)*size(pc,2);
     vecXYZ=[reshape(pc(:,:,1),[1 totPix]);
             reshape(pc(:,:,2),[1 totPix]);
             reshape(pc(:,:,3),[1 totPix])];
-end
-
-function curView=viewSynthesisNN(aList,eList,rList,azTicks,elTicks,curView)
-    minA=min(aList)-1e-8; maxA=max(aList)+1e-8;
-    minE=min(eList)-1e-8; maxE=max(eList)+1e-8;
-    azTickInd=find(azTicks>=minA&azTicks<=maxA);
-    elTickInd=find(elTicks>=minE&elTicks<=maxE);
-    if isempty(azTickInd)||isempty(elTickInd); return; end
-    [locA,locE]=meshgrid(azTicks(azTickInd),elTicks(elTickInd));
-    v12=[aList(2)-aList(1) eList(2)-eList(1)];
-    v23=[aList(3)-aList(2) eList(3)-eList(2)];
-    v31=[aList(1)-aList(3) eList(1)-eList(3)];
-    u12=v12/norm(v12); u23=v23/norm(v23); u31=v31/norm(v31);
-    vert1=u12(1)*(locA-aList(1))+u12(2)*(locE-eList(1))<norm(v12)/2&-u31(1)*(locA-aList(1))-u31(2)*(locE-eList(1))<=norm(v31)/2;
-    vert2=-u12(1)*(locA-aList(2))-u12(2)*(locE-eList(2))<=norm(v12)/2&u23(1)*(locA-aList(2))+u23(2)*(locE-eList(2))<norm(v23)/2;
-    vert3=-u23(1)*(locA-aList(3))-u23(2)*(locE-eList(3))<=norm(v23)/2&u31(1)*(locA-aList(3))+u31(2)*(locE-eList(3))<norm(v31)/2;
-    inMask=inTriangle(aList,eList,locA,locE);
-    locR=Inf(size(locA));
-    locR(inMask&vert1)=rList(1); locR(inMask&vert2)=rList(2); locR(inMask&vert3)=rList(3);
-    blockR=curView(elTickInd,azTickInd);
-    blockR(blockR>locR)=locR(blockR>locR);
-    curView(elTickInd,azTickInd)=blockR;
-end
-
-function [isConsistSE,isConsistNW]=boxConsist(aGrid,eGrid)
-    dAlat=aGrid(:,1:end-1)-aGrid(:,2:end); dEvrt=eGrid(1:end-1,:)-eGrid(2:end,:);
-    dElat=eGrid(:,1:end-1)-eGrid(:,2:end); dAvrt=aGrid(1:end-1,:)-aGrid(2:end,:);
-    a=dAlat(2:end,:); b=dElat(2:end,:); c=dAvrt(:,2:end); d=dEvrt(:,2:end);
-    isConsistSE=(a.*d-b.*c)>0;
-    a=dAlat(1:end-1,:); b=dElat(1:end-1,:); c=dAvrt(:,1:end-1); d=dEvrt(:,1:end-1);
-    isConsistNW=(a.*d-b.*c)>0;
-end
-
-function inMask=inTriangle(vx,vy,xGrid,yGrid)
-    vMat=[vx;vy;zeros(1,3)]; khat=[0 0 1];
-    v12=vMat(:,2)-vMat(:,1); v23=vMat(:,3)-vMat(:,2); v31=vMat(:,1)-vMat(:,3);
-    nv12=cross(v12,khat); nv23=cross(v23,khat); nv31=cross(v31,khat);
-    inside12=(nv12(1)*(xGrid-vx(1))+nv12(2)*(yGrid-vy(1)))*sign(dot(nv12,-v31))>=-1e-5;
-    inside23=(nv23(1)*(xGrid-vx(2))+nv23(2)*(yGrid-vy(2)))*sign(dot(nv23,-v12))>=-1e-5;
-    inside31=(nv31(1)*(xGrid-vx(3))+nv31(2)*(yGrid-vy(3)))*sign(dot(nv31,-v23))>=-1e-5;
-    inMask=inside12&inside23&inside31;
 end
